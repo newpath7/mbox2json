@@ -60,6 +60,7 @@ impl MyMail {
             NaiveTime::from_hms_milli(0, 0, 0, 0))).timestamp();
     }
 }
+
 fn main() {
 	let mbox = mailbox::read(File::open(env::args()
 		.nth(1).expect("no file given")).unwrap());
@@ -67,8 +68,6 @@ fn main() {
     let mut i = 0;
 
 	for mail in mbox {
-        if i > 0 { print!(",\n"); }
-        i += 1;
         let mut mymailito = MyMail {
 			to: AddInfo { val: "".to_string(), ads: Vec::new(),},
             from: AddInfo { val: "".to_string(), ads: Vec::new(), },
@@ -77,28 +76,37 @@ fn main() {
             date: "".to_string(), cdate: 0,
             subject: "".to_string(),  body: "".to_string(),
          };
+		let mref = mail.as_ref();
 
-		for hkey in mail.as_ref().unwrap().headers().keys() {
-            match hkey.as_ref().to_string().as_str() {
-			    "To" => { mymailito.to.val = gethfield(hkey.owner(), "To");
+		let mref = match mref {
+			Ok(mr) => {
+        		if i > 0 { print!(",\n"); }
+				i += 1;
+	
+				for hkey in mr.headers().keys() {
+            		match hkey.as_ref().to_string().as_str() {
+			    		"To" => { mymailito.to.val = gethfield(hkey.owner(), "To");
                           mymailito.to.setads() },
-			    "From" => { mymailito.from.val = gethfield(hkey.owner(), "From");
+			    		"From" => { mymailito.from.val = gethfield(hkey.owner(), "From");
                           mymailito.from.setads() },
-			    "Cc" => { mymailito.cc.val = gethfield(hkey.owner(), "Cc");
+			    		"Cc" => { mymailito.cc.val = gethfield(hkey.owner(), "Cc");
                           mymailito.cc.setads() },
-			    "Bcc" => { mymailito.bcc.val = gethfield(hkey.owner(), "Bcc");
+			    		"Bcc" => { mymailito.bcc.val = gethfield(hkey.owner(), "Bcc");
                           mymailito.bcc.setads() },
-                "Date" => mymailito.date = gethfield(hkey.owner(), "Date"),
-                "Subject" => mymailito.subject = gethfield(hkey.owner(), "Subject"),
-                _ => (),
-            }
-		}
-        mymailito.setcdate();
+                		"Date" => mymailito.date = gethfield(hkey.owner(), "Date"),
+                		"Subject" => mymailito.subject = gethfield(hkey.owner(), "Subject"),
+                		_ => (),
+            		}
+				}
+        		mymailito.setcdate();
 
-        for bod in mail.unwrap().body().iter() {
-	        mymailito.body.push(char::from(bod));
-	    }
-        print!("{}", serde_json::to_string(&mymailito).unwrap());
+        		for bod in mail.unwrap().body().iter() {
+	        		mymailito.body.push(char::from(bod));
+	    		}
+        		print!("{}", serde_json::to_string(&mymailito).unwrap());
+			},
+			_ => continue,
+		};
 	}
 	println!("]");
 }
