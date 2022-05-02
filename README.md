@@ -6,5 +6,5 @@
 
 ## Usage
 cargo run &lt;path-to-mbox-file&gt; [*nbytes start*] [*-tcdb*] [*skip*]  
-*nbytes start* to skip first nbytes of the mbox file  1
+*nbytes start* to skip first nbytes of the mbox file   
 Use *-tcdb* to send to a CouchDB instead. *skip* is the number of parsed emails to discard before actually saving to DB.
