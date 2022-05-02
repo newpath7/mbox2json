@@ -11,3 +11,8 @@ regex = "1.5.4"
 serde = {version = "1.0.136", features = ["derive"]}
 serde_json = "1.0.79"
 chrono = "0.4.19"
+dotenv = "0.15.0"
+couch_rs = "0.8.37"
+futures = "0.3.21"
+tokio = { version = "1.18.0", features = ["full"]}
+ansi-escapes = "0.1.1"

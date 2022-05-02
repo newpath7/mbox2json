@@ -14,16 +14,28 @@
 
 // usage: mbox2json <mboxfile>
 // In JSON format, outputs some fields from each email from mbox
-
+// MBOX file format requirement(s):
+//  * Date in the From header line should be 24 characters long 
+//          - GMail MBox exports include timezones which break this requirement
 use mailbox;
 use regex::Regex;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use serde_json;
-use std::{fs::File, env, str};
+use serde_json::to_value;
+use std::{fs::File, env, str, 
+    io::Seek, io::SeekFrom};
 use std::vec::Vec;
 use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
 
-#[derive(Serialize)]
+use dotenv::dotenv;
+use couch_rs::CouchDocument;
+use couch_rs::types::document::DocumentId;
+use couch_rs::document::TypedCouchDocument;
+use futures::executor::block_on;
+
+use ansi_escapes;
+
+#[derive(Serialize, Deserialize)]
 struct AddInfo {
     val: String,
     ads: Vec<String>,  // addresses
@@ -40,8 +52,12 @@ impl AddInfo {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, CouchDocument)]
 struct MyMail {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    _id: DocumentId,
+    #[serde(skip_serializing_if = "String::is_empty")]
+     _rev: String,
     to: AddInfo,
 	from: AddInfo,
 	bcc: AddInfo,
@@ -61,14 +77,51 @@ impl MyMail {
     }
 }
 
-fn main() {
-	let mbox = mailbox::read(File::open(env::args()
-		.nth(1).expect("no file given")).unwrap());
-    print!("[");
+#[tokio::main]
+async fn main() {
+    let args: Vec<String> = env::args().collect();
+    let tcdb = match args.get(3) {
+        Some(argu) => if argu.as_str() == "-tcdb" { true } else { false },
+        None => false
+    };
+
+    if args.len() == 0 { 
+        println!("usage: mbox2json <mbox-file> [nbytes start] [-tcdb] [skip]"); 
+       std:: process::exit(0);
+    }
+    let mut mboxfile = File::open(&args[1]).expect("could not open file");
+
+    if args.len() > 1 {
+        mboxfile.seek(SeekFrom::Start(args[2].parse::<u64>()
+            .unwrap_or(0))).unwrap();
+    }
     let mut i = 0;
+    let iskip: usize = match args.get(4) {
+        Some(skip) => skip.parse::<usize>().unwrap(),
+        None => 0,
+    };
+
+    let db = if tcdb {
+        dotenv().ok(); 
+        println!("");
+        let client = couch_rs::Client::new_with_timeout(&env::var("host").unwrap(),
+            Some(&env::var("username").unwrap()),
+            Some(&env::var("password").unwrap()),
+            Some(env::var("timeout").unwrap().parse::<u64>().unwrap())).unwrap();
+        block_on(client.db(&env::var("database").unwrap_or("".to_string())))
+    } else { 
+        let client = couch_rs::Client::new_no_auth("http://172.17.0.2:5984").unwrap();
+        block_on(client.db("database"))
+    };
+
+    if iskip > 0 { println!("Skipping first {} emails\n", iskip); }
+	let mbox = mailbox::read(mboxfile);
+    if !tcdb { print!("[");  }
 
 	for mail in mbox {
         let mut mymailito = MyMail {
+            _id: "".to_string(), 
+            _rev: "".to_string(),
 			to: AddInfo { val: "".to_string(), ads: Vec::new(),},
             from: AddInfo { val: "".to_string(), ads: Vec::new(), },
             bcc: AddInfo { val: "".to_string(), ads: Vec::new(), },
@@ -78,11 +131,11 @@ fn main() {
          };
 		let mref = mail.as_ref();
 
-		let mref = match mref {
+		let _mref = match mref {
 			Ok(mr) => {
-        		if i > 0 { print!(",\n"); }
+        		if i > 0 && !tcdb { print!(",\n"); }
 				i += 1;
-	
+	           
 				for hkey in mr.headers().keys() {
             		match hkey.as_ref().to_string().as_str() {
 			    		"To" => { mymailito.to.val = gethfield(hkey.owner(), "To");
@@ -103,12 +156,22 @@ fn main() {
         		for bod in mail.unwrap().body().iter() {
 	        		mymailito.body.push(char::from(bod));
 	    		}
-        		print!("{}", serde_json::to_string(&mymailito).unwrap());
+        		if !tcdb { 
+                    print!("{}", serde_json::to_string(&mymailito).unwrap());  
+                } else {
+                    if i > iskip {  
+                    let mut value = to_value(mymailito).unwrap();
+                    match  db.as_ref().unwrap().create(&mut value).await {
+                        Ok(_v) => println!("{}Added: {}", ansi_escapes::EraseLines(2), i),
+                        Err(e) => println!("{:?}", e),
+                    };
+                    }
+                }
 			},
 			_ => continue,
 		};
 	}
-	println!("]");
+	if !tcdb { println!("]");  }
 }
 
 fn gethfield(s: &String, misc: &str) -> String {
